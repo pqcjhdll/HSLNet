@@ -112,7 +112,7 @@ class MultiStageTrainer:
             return
 
         for name, parameter in self.model.named_parameters():
-            parameter.requires_grad = not any(key in name for key in ["clear_contrastive_model", "contrastive_adapter"])
+            parameter.requires_grad = not any(key in name for key in ["contrastive_model", "contrastive_adapter"])
 
         trainable_params = [parameter for parameter in self.model.parameters() if parameter.requires_grad]
         optimizer = self._build_optimizer(trainable_params)
