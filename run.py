@@ -17,7 +17,7 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 from config import get_args, save_args
-from models import MultiStageTrainer, UnifiedClearCSLSModel
+from models import MultiStageTrainer, UnifiedModel
 
 
 logging.basicConfig(
@@ -46,10 +46,10 @@ def main():
     from utils.data_utils import build_dataloaders
 
     save_args(args, os.path.join(args.output_dir, "config.json"))
-    logger.info("开始运行统一框架: Clear 对比学习 + CSLS 行级建模")
+    logger.info("开始运行统一框架: 对比学习 + 行级建模")
     logger.info("配置: %s", json.dumps(vars(args), ensure_ascii=False))
 
-    model = UnifiedClearCSLSModel(args)
+    model = UnifiedModel(args)
     tokenizer = model.tokenizer
     contrastive_loader, positive_loader, train_loader, val_loader, test_loader = build_dataloaders(args, tokenizer)
 
