@@ -17,15 +17,15 @@ def _allow_local_bin_checkpoints():
 _allow_local_bin_checkpoints()
 
 
-def _load_clear_clip_class():
-    clip_path = Path(__file__).resolve().parents[2] / "Clear-main" / "Clear-main" / "clip_mlm.py"
-    module_spec = importlib.util.spec_from_file_location("clear_original_clip", clip_path)
+def _load_clip_class():
+
+    module_spec = importlib.util.spec_from_file_location("original_clip", clip_path)
     module = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(module)
     return module.CLIP
 
 
-class ClearContrastiveLoss(nn.Module):
+class ContrastiveLoss(nn.Module):
     def __init__(self, margin=2.0, mode="both"):
         super().__init__()
         if mode not in {"both", "positive", "negative"}:
@@ -51,14 +51,14 @@ class ClearContrastiveLoss(nn.Module):
         return loss.mean()
 
 
-class UnifiedClearCSLSModel(nn.Module):
+class UnifiedModel(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
         self.tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
-        clear_clip_cls = _load_clear_clip_class()
-        self.clear_contrastive_model = clear_clip_cls(
+        clip_cls = _load_clip_class()
+        self.contrastive_model = clip_cls(
             args=args,
             dim_text=512,
             num_text_tokens=self.tokenizer.vocab_size,
@@ -78,7 +78,7 @@ class UnifiedClearCSLSModel(nn.Module):
             nn.ReLU(),
             nn.Dropout(args.dropout),
         )
-        self.contrastive_loss_fn = ClearContrastiveLoss(
+        self.contrastive_loss_fn = ContrastiveLoss(
             margin=args.contrastive_margin,
             mode=args.contrastive_mode,
         )
@@ -117,7 +117,7 @@ class UnifiedClearCSLSModel(nn.Module):
         feature_mode="unified",
     ):
         if feature_mode == "contrastive":
-            return self._encode_clear_contrastive_logits(text1)
+            return self._encode_contrastive_logits(text1)
         if feature_mode == "line_level":
             global_feature, line_semantic_feature, line_structure_feature = self._forward_line_branches(
                 batch_input_ids,
@@ -128,7 +128,7 @@ class UnifiedClearCSLSModel(nn.Module):
                 torch.cat([global_feature, line_semantic_feature, line_structure_feature], dim=1)
             )
         if feature_mode == "unified":
-            contrastive_feature = self._project_clear_contrastive_feature(text1)
+            contrastive_feature = self._project_contrastive_feature(text1)
             global_feature, line_semantic_feature, line_structure_feature = self._forward_line_branches(
                 batch_input_ids,
                 line_rule_mask,
@@ -171,20 +171,20 @@ class UnifiedClearCSLSModel(nn.Module):
             )
         raise ValueError(f"Unknown training mode: {training_mode}")
 
-    def _encode_clear_contrastive_logits(self, input_ids):
-        logits1, _, _ = self.clear_contrastive_model(
+    def _encode_contrastive_logits(self, input_ids):
+        logits1, _, _ = self.contrastive_model(
             text1=input_ids,
             text2=input_ids,
             training_classifier=False,
         )
         return logits1
 
-    def _project_clear_contrastive_feature(self, input_ids):
-        contrastive_logits = self._encode_clear_contrastive_logits(input_ids)
+    def _project_contrastive_feature(self, input_ids):
+        contrastive_logits = self._encode_contrastive_logits(input_ids)
         return self.contrastive_adapter(contrastive_logits)
 
     def _contrastive_forward(self, text1, text2, labels):
-        logits1, logits2, ssl_loss = self.clear_contrastive_model(
+        logits1, logits2, ssl_loss = self.contrastive_model(
             text1=text1,
             text2=text2,
             training_classifier=False,
@@ -232,7 +232,7 @@ class UnifiedClearCSLSModel(nn.Module):
         sentence_cls = torch.stack(sentence_cls_list, dim=0)
         return sentence_cls, line_valid_mask
 
-    def _select_csls_key_line(self, sentence_cls, line_valid_mask):
+    def _select_key_line(self, sentence_cls, line_valid_mask):
         sentence_means = sentence_cls.mean(dim=2)
         sentence_means = sentence_means.masked_fill(~line_valid_mask, float("inf"))
         min_sentence_indices = sentence_means.argmin(dim=1)
@@ -241,7 +241,7 @@ class UnifiedClearCSLSModel(nn.Module):
 
     def _aggregate_sensitive_lines(self, sentence_cls, line_rule_mask, line_valid_mask):
         if line_rule_mask is None:
-            return self._select_csls_key_line(sentence_cls, line_valid_mask)
+            return self._select_key_line(sentence_cls, line_valid_mask)
 
         if line_rule_mask.dim() > 2:
             line_rule_mask = line_rule_mask.squeeze(-1)
@@ -262,7 +262,7 @@ class UnifiedClearCSLSModel(nn.Module):
             counts = weights.sum(dim=1).clamp(min=1.0)
             aggregated[rule_hits] = weighted_sum / counts
 
-        fallback = self._select_csls_key_line(sentence_cls, line_valid_mask)
+        fallback = self._select_key_line(sentence_cls, line_valid_mask)
         aggregated[~rule_hits] = fallback[~rule_hits]
         return aggregated
 
@@ -300,7 +300,7 @@ class UnifiedClearCSLSModel(nn.Module):
         return loss, logits
 
     def _unified_forward(self, text1, batch_input_ids, line_rule_mask, global_input_ids, labels):
-        contrastive_feature = self._project_clear_contrastive_feature(text1)
+        contrastive_feature = self._project_contrastive_feature(text1)
         global_feature, line_semantic_feature, line_structure_feature = self._forward_line_branches(
             batch_input_ids,
             line_rule_mask,
